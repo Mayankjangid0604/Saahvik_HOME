@@ -1,7 +1,42 @@
+# Dependencies
 node_modules/
-dist/
+/.pnp
+.pnp.js
+
+# Environment variables
 .env
-uploads/
+.env.local
+.env.*.local
+*.env
+
+# Build outputs
+dist/
+build/
 coverage/
+*.tsbuildinfo
+
+# Uploads & Temporary files
+uploads/
+temp/
+tmp/
+
+# Logs
+logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# AI Assistant & IDE metadata
+.agents/
 .claude/
+.cursor/
+.devin/
+.idea/
+.vscode/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
