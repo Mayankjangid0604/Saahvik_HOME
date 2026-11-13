@@ -1,0 +1,508 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Multi-tenant Org ───────────────────────────────────────
+
+model Org {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  email     String
+  phone     String?
+  address   String?
+  logo      String?
+  timezone  String   @default("Asia/Kolkata")
+  currency  String   @default("INR")
+  plan      Plan     @default(BASIC)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  properties    Property[]
+  residents     Resident[]
+  invoices      Invoice[]
+  complaints    Complaint[]
+  notifications Notification[]
+  files         File[]
+  auditLogs     AuditLog[]
+  admissionForm AdmissionFormConfig?
+  orgSettings   OrgSettings?
+  emailUsage    EmailUsage[]
+}
+
+enum Plan {
+  BASIC
+  BEGINNER_PLUS
+  PROFESSIONAL
+  BUSINESS
+  ENTERPRISE
+}
+
+// ─── Users (Staff + Guardians) ──────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  orgId         String
+  email         String?
+  phone         String?
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          UserRole
+  isActive      Boolean   @default(true)
+  is2FAEnabled  Boolean   @default(false)
+  twoFASecret   String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  org              Org              @relation(fields: [orgId], references: [id])
+  loginAudits      LoginAudit[]
+  otps             OTP[]
+  assignedComplaints Complaint[]    @relation("AssignedTo")
+  createdComplaints  Complaint[]    @relation("CreatedBy")
+  staffProfile     StaffProfile?
+  notifications    Notification[]   @relation("NotificationRecipient")
+  auditLogs        AuditLog[]
+  guardianOf       Resident[]       @relation("GuardianOf")
+
+  @@unique([orgId, email])
+  @@unique([orgId, phone])
+  @@index([orgId, role])
+}
+
+enum UserRole {
+  OWNER
+  WARDEN
+  STAFF
+  PARENT
+}
+
+model StaffProfile {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  department   String?
+  designation  String?
+  joiningDate  DateTime?
+  salary       Float?
+  address      String?
+  emergencyContact String?
+  documents    Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model LoginAudit {
+  id        String   @id @default(uuid())
+  userId    String
+  ip        String?
+  userAgent String?
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model OTP {
+  id        String   @id @default(uuid())
+  userId    String
+  code      String
+  purpose   OTPPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, purpose])
+}
+
+enum OTPPurpose {
+  LOGIN
+  PASSWORD_RESET
+  TWO_FA_SETUP
+}
+
+// ─── Property / Room / Bed ──────────────────────────────────
+
+model Property {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  address   String?
+  type      PropertyType @default(HOSTEL)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org   Org    @relation(fields: [orgId], references: [id])
+  rooms Room[]
+
+  @@unique([orgId, name])
+}
+
+enum PropertyType {
+  HOSTEL
+  PG
+  DORMITORY
+}
+
+model Room {
+  id         String   @id @default(uuid())
+  propertyId String
+  number     String
+  floor      Int      @default(0)
+  capacity   Int
+  roomType   RoomType @default(SHARED)
+  amenities  Json?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  property Property @relation(fields: [propertyId], references: [id])
+  beds     Bed[]
+
+  @@unique([propertyId, number])
+}
+
+enum RoomType {
+  SINGLE
+  DOUBLE
+  TRIPLE
+  SHARED
+  DORMITORY
+}
+
+model Bed {
+  id        String    @id @default(uuid())
+  roomId    String
+  label     String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  room     Room      @relation(fields: [roomId], references: [id])
+  resident Resident? @relation("CurrentBed")
+
+  @@unique([roomId, label])
+}
+
+// ─── Residents ──────────────────────────────────────────────
+
+model Resident {
+  id              String        @id @default(uuid())
+  orgId           String
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String?
+  dateOfBirth     DateTime?
+  gender          Gender?
+  address         String?
+  photo           String?
+  idProofType     String?
+  idProofNumber   String?
+  idProofDoc      String?
+  status          ResidentStatus @default(ACTIVE)
+  bedId           String?       @unique
+  guardianId      String?
+  admissionDate   DateTime      @default(now())
+  exitDate        DateTime?
+  exitReason      String?
+  customFields    Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  org       Org       @relation(fields: [orgId], references: [id])
+  bed       Bed?      @relation("CurrentBed", fields: [bedId], references: [id])
+  guardian  User?     @relation("GuardianOf", fields: [guardianId], references: [id])
+  invoices  Invoice[]
+  payments  Payment[]
+  feeConfig ResidentFeeConfig[]
+
+  @@index([orgId, status])
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum ResidentStatus {
+  ACTIVE
+  CHECKED_OUT
+  EXPELLED
+  ON_LEAVE
+}
+
+model ResidentFeeConfig {
+  id          String      @id @default(uuid())
+  residentId  String
+  feeType     String
+  amount      Float
+  recurrence  Recurrence
+  startDate   DateTime
+  endDate     DateTime?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  resident Resident @relation(fields: [residentId], references: [id])
+
+  @@index([residentId])
+}
+
+enum Recurrence {
+  ONE_TIME
+  MONTHLY
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+}
+
+// ─── Admission Form Config ──────────────────────────────────
+
+model AdmissionFormConfig {
+  id        String   @id @default(uuid())
+  orgId     String   @unique
+  fields    Json
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id])
+}
+
+// ─── Billing / Invoices ─────────────────────────────────────
+
+model Invoice {
+  id          String        @id @default(uuid())
+  orgId       String
+  residentId  String
+  number      String
+  items       Json
+  subtotal    Float
+  tax         Float         @default(0)
+  discount    Float         @default(0)
+  total       Float
+  status      InvoiceStatus @default(PENDING)
+  dueDate     DateTime
+  paidAt      DateTime?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  org      Org       @relation(fields: [orgId], references: [id])
+  resident Resident  @relation(fields: [residentId], references: [id])
+  payments Payment[]
+
+  @@unique([orgId, number])
+  @@index([orgId, status])
+  @@index([residentId])
+}
+
+enum InvoiceStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+// ─── Payments (Razorpay) ────────────────────────────────────
+
+model Payment {
+  id                String        @id @default(uuid())
+  invoiceId         String
+  residentId        String
+  amount            Float
+  method            PaymentMethod
+  status            PaymentStatus @default(PENDING)
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  receiptNumber     String?
+  notes             String?
+  paidAt            DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  invoice  Invoice  @relation(fields: [invoiceId], references: [id])
+  resident Resident @relation(fields: [residentId], references: [id])
+
+  @@index([invoiceId])
+  @@index([razorpayOrderId])
+}
+
+enum PaymentMethod {
+  RAZORPAY
+  CASH
+  BANK_TRANSFER
+  CHEQUE
+  UPI
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ─── Complaints & Maintenance ───────────────────────────────
+
+model Complaint {
+  id          String          @id @default(uuid())
+  orgId       String
+  title       String
+  description String
+  category    ComplaintCategory
+  priority    Priority        @default(MEDIUM)
+  status      ComplaintStatus @default(OPEN)
+  photos      Json?
+  assignedToId String?
+  createdById  String
+  resolvedAt  DateTime?
+  resolution  String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  org        Org  @relation(fields: [orgId], references: [id])
+  assignedTo User? @relation("AssignedTo", fields: [assignedToId], references: [id])
+  createdBy  User  @relation("CreatedBy", fields: [createdById], references: [id])
+
+  @@index([orgId, status])
+}
+
+enum ComplaintCategory {
+  PLUMBING
+  ELECTRICAL
+  FURNITURE
+  CLEANING
+  PEST_CONTROL
+  GENERAL
+  OTHER
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ComplaintStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+// ─── Communication / Notifications ──────────────────────────
+
+model Notification {
+  id        String             @id @default(uuid())
+  orgId     String
+  userId    String
+  title     String
+  body      String
+  channel   NotificationChannel
+  isRead    Boolean            @default(false)
+  readAt    DateTime?
+  createdAt DateTime           @default(now())
+
+  org  Org  @relation(fields: [orgId], references: [id])
+  user User @relation("NotificationRecipient", fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([orgId, createdAt])
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+model EmailUsage {
+  id        String   @id @default(uuid())
+  orgId     String
+  month     Int
+  year      Int
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id])
+
+  @@unique([orgId, month, year])
+}
+
+// ─── Files / Documents ──────────────────────────────────────
+
+model File {
+  id          String   @id @default(uuid())
+  orgId       String
+  name        String
+  path        String
+  mimeType    String
+  sizeBytes   Int
+  category    String?
+  uploadedBy  String
+  createdAt   DateTime @default(now())
+
+  org Org @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, category])
+}
+
+// ─── Audit Log ──────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  orgId     String
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  org  Org   @relation(fields: [orgId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([orgId, createdAt])
+  @@index([orgId, entity])
+}
+
+// ─── Org Settings ───────────────────────────────────────────
+
+model OrgSettings {
+  id                  String  @id @default(uuid())
+  orgId               String  @unique
+  invoicePrefix       String  @default("INV")
+  invoiceNextNumber   Int     @default(1)
+  defaultPaymentTerms Int     @default(15)
+  lateFeePercentage   Float   @default(0)
+  maintenanceEmail    String?
+  billingEmail        String?
+  notificationPrefs   Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  org Org @relation(fields: [orgId], references: [id])
+}
